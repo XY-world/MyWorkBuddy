@@ -1,19 +1,19 @@
 import { EventEmitter } from 'events';
-import { getPrCommentThreads, PrCommentThread } from '../ado/pull-requests';
+import { getPrCommentThreads, PrCommentThread, getPrStatus } from '../ado/pull-requests';
 import { getSession } from '../memory/session';
 import { getDb } from '../db/client';
 import { prComments } from '../db/schema';
 import { eq, and } from 'drizzle-orm';
-import { Orchestrator } from '../agents/orchestrator';
+import { PipelineRunner } from '../agents/pipeline-runner';
 
-const POLL_INTERVAL_MS = 2 * 60 * 1000; // poll every 2 minutes
+const POLL_INTERVAL_MS = 2 * 60 * 1000; // 2 minutes
 
 interface MonitorEntry {
   sessionId: number;
   prId: number;
   project: string;
   repo: string;
-  orchestrator: Orchestrator;
+  runner: PipelineRunner;
   timer: ReturnType<typeof setInterval>;
 }
 
@@ -21,8 +21,8 @@ interface MonitorEntry {
  * PrMonitor — polls Azure DevOps PR comment threads at a regular interval.
  *
  * When new unprocessed comment threads are found:
- * 1. Wakes the Orchestrator via resumeForPrFix()
- * 2. The Orchestrator runs PrFixAgent to address the comments
+ * 1. Wakes the PipelineRunner via resumeForPrFix()
+ * 2. The runner executes PrFixAgent to address the comments
  * 3. The monitor continues polling until the PR is merged or abandoned
  */
 export class PrMonitor extends EventEmitter {
@@ -34,17 +34,14 @@ export class PrMonitor extends EventEmitter {
     this.manager = manager;
   }
 
-  /**
-   * Starts monitoring a PR for new comments.
-   */
   start(
     sessionId: number,
     prId: number,
     project: string,
     repo: string,
-    orchestrator: Orchestrator,
+    runner: PipelineRunner,
   ): void {
-    if (this.monitors.has(sessionId)) return; // already monitoring
+    if (this.monitors.has(sessionId)) return;
 
     const timer = setInterval(
       () => this.poll(sessionId).catch((err) => {
@@ -53,15 +50,11 @@ export class PrMonitor extends EventEmitter {
       POLL_INTERVAL_MS,
     );
 
-    this.monitors.set(sessionId, { sessionId, prId, project, repo, orchestrator, timer });
+    this.monitors.set(sessionId, { sessionId, prId, project, repo, runner, timer });
     console.log(`[PrMonitor] Started monitoring PR #${prId} for session ${sessionId}`);
   }
 
-  /**
-   * Stops monitoring for a session (e.g. PR merged, pipeline stopped).
-   */
   stop(workItemId: number): void {
-    // Find session by work item id
     for (const [sessionId, entry] of this.monitors) {
       const session = getSession(sessionId);
       if (session?.workItemId === workItemId) {
@@ -78,6 +71,7 @@ export class PrMonitor extends EventEmitter {
     if (entry) {
       clearInterval(entry.timer);
       this.monitors.delete(sessionId);
+      console.log(`[PrMonitor] Stopped monitoring session ${sessionId}`);
     }
   }
 
@@ -86,7 +80,7 @@ export class PrMonitor extends EventEmitter {
   }
 
   dispose(): void {
-    for (const [, entry] of this.monitors) {
+    for (const entry of this.monitors.values()) {
       clearInterval(entry.timer);
     }
     this.monitors.clear();
@@ -102,16 +96,22 @@ export class PrMonitor extends EventEmitter {
       return;
     }
 
-    // Stop monitoring if PR is merged or abandoned
+    // Check PR status
     try {
-      const { getPrStatus } = await import('../ado/pull-requests');
       const prStatus = await getPrStatus(entry.project, entry.repo, entry.prId);
-      if (prStatus === 'completed' || prStatus === 'abandoned') {
-        console.log(`[PrMonitor] PR #${entry.prId} is ${prStatus}, stopping monitor`);
+      if (prStatus === 'completed') {
+        console.log(`[PrMonitor] PR #${entry.prId} merged — closing session`);
         this.stopBySessionId(sessionId);
+        this.manager.emit('session_pr_merged', sessionId, entry.prId);
         return;
       }
-    } catch { /* Non-critical — keep monitoring */ }
+      if (prStatus === 'abandoned') {
+        console.log(`[PrMonitor] PR #${entry.prId} abandoned — stopping monitor`);
+        this.stopBySessionId(sessionId);
+        this.manager.emit('session_pr_abandoned', sessionId, entry.prId);
+        return;
+      }
+    } catch { /* Non-critical */ }
 
     // Fetch active comment threads
     let threads: PrCommentThread[];
@@ -124,7 +124,7 @@ export class PrMonitor extends EventEmitter {
 
     if (threads.length === 0) return;
 
-    // Filter out threads we've already processed
+    // Filter out already processed threads
     const newThreads = threads.filter((t) => !this.isThreadProcessed(sessionId, entry.prId, t.threadId));
 
     if (newThreads.length === 0) return;
@@ -137,9 +137,9 @@ export class PrMonitor extends EventEmitter {
 
     // Trigger the fix cycle
     try {
-      await entry.orchestrator.resumeForPrFix(newThreads);
+      await entry.runner.resumeForPrFix(newThreads);
     } catch (err: any) {
-      console.error(`[PrMonitor] resumeForPrFix failed for session ${sessionId}: ${err.message}`);
+      console.error(`[PrMonitor] resumeForPrFix failed: ${err.message}`);
     }
   }
 

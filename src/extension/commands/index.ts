@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { WorkItemProvider, WorkItemLeafNode } from '../providers/WorkItemProvider';
-import { PipelineProvider, PipelineRootNode } from '../providers/PipelineProvider';
+import { PipelineProvider, SessionRootNode } from '../providers/PipelineProvider';
 import { PipelineManager } from '../../pipeline/manager';
 import { getConfig } from '../../config/manager';
 import { initDb } from '../../db/client';
@@ -58,14 +58,24 @@ export function registerCommands(
         return;
       }
 
-      if (pipelineManager.isRunning(wi.id)) {
+      // Check if session is already active
+      const existingStatus = pipelineManager.getSessionStatus(
+        // We don't have sessionId here, need to check by workItemId
+        // For now, use getAllSessions to find it
+        ...pipelineManager.getAllSessions().filter(s => s.workItemId === wi.id).map(s => s.sessionId)
+      );
+
+      if (existingStatus && pipelineManager.isSessionActive(existingStatus.sessionId)) {
         const action = await vscode.window.showWarningMessage(
           `A pipeline for WI#${wi.id} is already running.`,
           'Stop & Restart',
+          'Queue Another Run',
           'Dismiss',
         );
         if (action === 'Stop & Restart') {
-          pipelineManager.stop(wi.id);
+          pipelineManager.stopRun(existingStatus.sessionId);
+        } else if (action === 'Queue Another Run') {
+          // Fall through to start, it will queue
         } else {
           return;
         }
@@ -86,13 +96,12 @@ export function registerCommands(
         return;
       }
 
-      // Resolve the local repo path: prefer open workspace folder, then ask
+      // Resolve the local repo path
       let repoLocalPath: string | undefined;
       const workspaceFolders = vscode.workspace.workspaceFolders;
       if (workspaceFolders && workspaceFolders.length === 1) {
         repoLocalPath = workspaceFolders[0].uri.fsPath;
       } else if (workspaceFolders && workspaceFolders.length > 1) {
-        // Multiple folders — let user pick
         const pick = await vscode.window.showQuickPick(
           workspaceFolders.map((f) => ({ label: f.name, description: f.uri.fsPath, fsPath: f.uri.fsPath })),
           { title: 'Select the local repo folder for this pipeline', ignoreFocusOut: true },
@@ -100,7 +109,6 @@ export function registerCommands(
         repoLocalPath = pick?.fsPath;
         if (!repoLocalPath) return;
       } else {
-        // No workspace open — ask user to pick a folder
         const picked = await vscode.window.showOpenDialog({
           canSelectFiles: false,
           canSelectFolders: true,
@@ -113,18 +121,20 @@ export function registerCommands(
 
       try {
         const detailPanel = PipelineDetailPanel.createOrShow(wi.id, wi.title, context);
-        pipelineManager.start(wi.id, {
+        
+        const { sessionId, runId } = await pipelineManager.startRun(wi.id, {
+          adoOrg: cfg.ado.orgUrl,
           project: cfg.ado.wiProject,
-          codeProject: cfg.ado.codeProject,
           repo: cfg.ado.defaultRepo,
-          orgUrl: cfg.ado.orgUrl,
+          title: wi.title,
           repoLocalPath,
+          triggeredBy: 'user',
         }, detailPanel.awaitConfirmation.bind(detailPanel),
            detailPanel.awaitBlueprintConfirmation.bind(detailPanel));
 
         logger.create(wi.id, wi.title);
         vscode.window.showInformationMessage(
-          `Pipeline started for WI#${wi.id}. Check OUTPUT panel → "MyWorkBuddy — WI#${wi.id}" for logs.`,
+          `Pipeline started for WI#${wi.id} (Session: ${sessionId}, Run: ${runId}).`,
           'Show Logs',
         ).then((action) => { if (action === 'Show Logs') logger.show(wi.id); });
         pipelineProvider.refresh();
@@ -133,42 +143,59 @@ export function registerCommands(
       }
     }),
 
-    vscode.commands.registerCommand('myworkbuddy.showLogs', (node: PipelineRootNode) => {
-      if (node?.pipeline?.workItemId) {
-        logger.show(node.pipeline.workItemId);
+    vscode.commands.registerCommand('myworkbuddy.showLogs', (node: SessionRootNode) => {
+      if (node?.session?.workItemId) {
+        logger.show(node.session.workItemId);
       }
     }),
 
-    vscode.commands.registerCommand('myworkbuddy.stopPipeline', async (node: PipelineRootNode) => {
-      if (!(node instanceof PipelineRootNode)) {
-        vscode.window.showErrorMessage('Please right-click a running pipeline to stop it');
+    vscode.commands.registerCommand('myworkbuddy.stopPipeline', async (node: SessionRootNode) => {
+      if (!(node instanceof SessionRootNode)) {
+        vscode.window.showErrorMessage('Please right-click a running session to stop it');
         return;
       }
 
       const confirm = await vscode.window.showWarningMessage(
-        `Stop pipeline for WI#${node.pipeline.workItemId}?`,
+        `Stop all runs for WI#${node.session.workItemId}?`,
         { modal: true },
         'Stop',
       );
       if (confirm !== 'Stop') return;
 
-      pipelineManager.stop(node.pipeline.workItemId);
+      pipelineManager.stopRun(node.session.sessionId);
       pipelineProvider.refresh();
-      vscode.window.showInformationMessage(`Pipeline for WI#${node.pipeline.workItemId} stopped.`);
+      vscode.window.showInformationMessage(`Session for WI#${node.session.workItemId} stopped.`);
+    }),
+
+    // ── Close session command ─────────────────────────────────────────────────
+
+    vscode.commands.registerCommand('myworkbuddy.closeSession', async (node: SessionRootNode) => {
+      if (!(node instanceof SessionRootNode)) return;
+
+      const confirm = await vscode.window.showWarningMessage(
+        `Close session for WI#${node.session.workItemId}? This will stop all runs and mark the session as closed.`,
+        { modal: true },
+        'Close',
+      );
+      if (confirm !== 'Close') return;
+
+      pipelineManager.closeSession(node.session.sessionId, 'manual');
+      pipelineProvider.refresh();
+      vscode.window.showInformationMessage(`Session for WI#${node.session.workItemId} closed.`);
     }),
 
     // ── Worktree command ──────────────────────────────────────────────────────
 
-    vscode.commands.registerCommand('myworkbuddy.openWorktree', async (node: PipelineRootNode) => {
-      const worktreePath = node?.pipeline?.worktreePath;
+    vscode.commands.registerCommand('myworkbuddy.openWorktree', async (node: SessionRootNode) => {
+      const worktreePath = node?.session?.worktreePath;
       if (!worktreePath) {
-        vscode.window.showWarningMessage('No worktree available for this pipeline yet. Wait until planning is complete.');
+        vscode.window.showWarningMessage('No worktree available for this session yet. Wait until planning is complete.');
         return;
       }
 
       const uri = vscode.Uri.file(worktreePath);
       const action = await vscode.window.showInformationMessage(
-        `Open worktree for WI#${node.pipeline.workItemId} in a new window?`,
+        `Open worktree for WI#${node.session.workItemId} in a new window?`,
         'New Window',
         'Add to Workspace',
       );
@@ -179,7 +206,7 @@ export function registerCommands(
         vscode.workspace.updateWorkspaceFolders(
           vscode.workspace.workspaceFolders?.length ?? 0,
           null,
-          { uri, name: `WI#${node.pipeline.workItemId} — ${node.pipeline.title}` },
+          { uri, name: `WI#${node.session.workItemId} — ${node.session.title}` },
         );
       }
     }),
@@ -192,9 +219,9 @@ export function registerCommands(
 
     // ── Pipeline detail panel ─────────────────────────────────────────────────
 
-    vscode.commands.registerCommand('myworkbuddy.openPipelineDetail', (node: PipelineRootNode) => {
-      if (!(node instanceof PipelineRootNode)) return;
-      PipelineDetailPanel.createOrShow(node.pipeline.workItemId, node.pipeline.title, context);
+    vscode.commands.registerCommand('myworkbuddy.openPipelineDetail', (node: SessionRootNode) => {
+      if (!(node instanceof SessionRootNode)) return;
+      PipelineDetailPanel.createOrShow(node.session.workItemId, node.session.title, context);
     }),
   ];
 }

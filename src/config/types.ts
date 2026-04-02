@@ -9,7 +9,8 @@ export interface AppConfig {
   };
   agent: {
     maxReviewRetries: number;
-    devConcurrency: number;
+    /** Maximum number of pipelines that can run concurrently (others are queued) */
+    maxConcurrency: number;
     workDir: string;
   };
   keyVault: {
@@ -26,7 +27,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   },
   agent: {
     maxReviewRetries: 2,
-    devConcurrency: 1,
+    maxConcurrency: 2,
     workDir: '~/.myworkbuddy/workspaces',
   },
   keyVault: {

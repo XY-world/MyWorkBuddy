@@ -1,12 +1,13 @@
 import * as vscode from 'vscode';
-import { PipelineManager, PipelineStatus } from '../../pipeline/manager';
-import { Phase } from '../../memory/session';
+import { PipelineManager, SessionStatus } from '../../pipeline/manager';
 
 // ── Tree node types ──────────────────────────────────────────────────────────
 
-export type PipelineNode = PipelineRootNode | PipelineDetailNode | MessageNode;
+export type PipelineNode = SessionRootNode | PipelineDetailNode | MessageNode;
 
-const PHASE_ICONS: Record<Phase | string, string> = {
+const PHASE_ICONS: Record<string, string> = {
+  pending:       'circle-outline',
+  queued:        'clock',
   wi_review:     'search',
   init:          'person',
   planning:      'list-ordered',
@@ -16,12 +17,17 @@ const PHASE_ICONS: Record<Phase | string, string> = {
   pr_creation:   'git-pull-request',
   pr_monitoring: 'bell',
   pr_fix:        'tools',
+  investigation: 'search',
+  draft_comment: 'comment',
+  post_comment:  'comment-discussion',
   complete:      'check',
 };
 
-const PHASE_LABELS: Record<Phase | string, string> = {
+const PHASE_LABELS: Record<string, string> = {
+  pending:       'Pending',
+  queued:        'Queued',
   wi_review:     'WI Review',
-  init:          'Planning',
+  init:          'Analysis',
   planning:      'Planning',
   development:   'Development',
   review:        'Code Review',
@@ -29,33 +35,53 @@ const PHASE_LABELS: Record<Phase | string, string> = {
   pr_creation:   'Creating PR',
   pr_monitoring: 'Monitoring PR',
   pr_fix:        'Fixing PR Comments',
+  investigation: 'Investigation',
+  draft_comment: 'Drafting Comment',
+  post_comment:  'Posting Comment',
   complete:      'Complete',
 };
 
-export class PipelineRootNode extends vscode.TreeItem {
-  readonly nodeType = 'pipeline' as const;
-  constructor(public readonly pipeline: PipelineStatus) {
+/**
+ * SessionRootNode represents a Session (Work Item) in the tree.
+ * Shows the current run's phase/status.
+ */
+export class SessionRootNode extends vscode.TreeItem {
+  readonly nodeType = 'session' as const;
+  constructor(public readonly session: SessionStatus) {
     super(
-      `WI#${pipeline.workItemId}: ${pipeline.title || 'Loading...'}`,
+      `WI#${session.workItemId}: ${session.title || 'Loading...'}`,
       vscode.TreeItemCollapsibleState.Expanded,
     );
-    this.contextValue = 'pipeline';
+    this.contextValue = 'session';
     this.command = {
       command: 'myworkbuddy.openPipelineDetail',
       title: 'Open Pipeline Detail',
       arguments: [this],
     };
-    this.description = PHASE_LABELS[pipeline.phase] ?? pipeline.phase;
-    this.iconPath = phaseIcon(pipeline.phase, pipeline.status);
+    
+    const currentPhase = session.currentRun?.phase ?? 'idle';
+    const currentStatus = session.currentRun?.status ?? session.sessionStatus;
+    
+    this.description = session.currentRun 
+      ? `${PHASE_LABELS[currentPhase] ?? currentPhase}${session.queuedRuns > 0 ? ` (+${session.queuedRuns} queued)` : ''}`
+      : session.sessionStatus === 'closed' ? 'Closed' : 'Idle';
+    
+    this.iconPath = sessionIcon(currentPhase, currentStatus, session.sessionStatus);
     this.tooltip = new vscode.MarkdownString(
-      `**WI#${pipeline.workItemId}**: ${pipeline.title}\n\n` +
-      `**Phase:** ${PHASE_LABELS[pipeline.phase] ?? pipeline.phase}  \n` +
-      `**Status:** ${pipeline.status}  \n` +
-      (pipeline.prUrl ? `**PR:** [View](${pipeline.prUrl})  \n` : '') +
-      (pipeline.worktreePath ? `**Worktree:** \`${pipeline.worktreePath}\`` : ''),
+      `**WI#${session.workItemId}**: ${session.title}\n\n` +
+      `**Session Status:** ${session.sessionStatus}  \n` +
+      (session.currentRun ? `**Current Run:** ${session.currentRun.type} (${session.currentRun.status})  \n` : '') +
+      (session.currentRun?.phase ? `**Phase:** ${PHASE_LABELS[session.currentRun.phase] ?? session.currentRun.phase}  \n` : '') +
+      (session.queuedRuns > 0 ? `**Queued Runs:** ${session.queuedRuns}  \n` : '') +
+      (session.currentRun?.prUrl ? `**PR:** [View](${session.currentRun.prUrl})  \n` : '') +
+      (session.branch ? `**Branch:** \`${session.branch}\`  \n` : '') +
+      (session.worktreePath ? `**Worktree:** \`${session.worktreePath}\`` : ''),
     );
   }
 }
+
+// Backwards compatibility alias
+export { SessionRootNode as PipelineRootNode };
 
 export class PipelineDetailNode extends vscode.TreeItem {
   readonly nodeType = 'detail' as const;
@@ -96,53 +122,76 @@ export class PipelineProvider implements vscode.TreeDataProvider<PipelineNode> {
     if (!element) {
       return this.getRootNodes();
     }
-    if (element instanceof PipelineRootNode) {
-      return this.getDetailsFor(element.pipeline);
+    if (element instanceof SessionRootNode) {
+      return this.getDetailsFor(element.session);
     }
     return [];
   }
 
   private getRootNodes(): PipelineNode[] {
-    const pipelines = this.pipelineManager.getAll();
+    const sessions = this.pipelineManager.getAllSessions();
 
-    if (pipelines.length === 0) {
-      return [new MessageNode('No active pipelines', 'circle-slash')];
+    if (sessions.length === 0) {
+      return [new MessageNode('No active sessions', 'circle-slash')];
     }
 
-    return pipelines.map((p) => new PipelineRootNode(p));
+    return sessions.map((s) => new SessionRootNode(s));
   }
 
-  private getDetailsFor(pipeline: PipelineStatus): PipelineDetailNode[] {
+  private getDetailsFor(session: SessionStatus): PipelineDetailNode[] {
     const details: PipelineDetailNode[] = [];
 
     details.push(new PipelineDetailNode(
-      'Phase',
-      PHASE_LABELS[pipeline.phase] ?? pipeline.phase,
-      PHASE_ICONS[pipeline.phase] ?? 'circle-outline',
+      'Session',
+      session.sessionStatus,
+      session.sessionStatus === 'active' ? 'circle-filled' : 'circle-outline',
     ));
 
-    details.push(new PipelineDetailNode(
-      'Status',
-      pipeline.status,
-      pipeline.status === 'active' ? 'loading~spin' : pipeline.status === 'complete' ? 'check' : 'warning',
-    ));
+    if (session.currentRun) {
+      details.push(new PipelineDetailNode(
+        'Run Type',
+        session.currentRun.type,
+        'symbol-event',
+      ));
 
-    if (pipeline.prUrl) {
-      details.push(new PipelineDetailNode('PR', pipeline.prUrl.split('/').slice(-2).join('/'), 'git-pull-request'));
+      details.push(new PipelineDetailNode(
+        'Phase',
+        PHASE_LABELS[session.currentRun.phase] ?? session.currentRun.phase,
+        PHASE_ICONS[session.currentRun.phase] ?? 'circle-outline',
+      ));
+
+      details.push(new PipelineDetailNode(
+        'Status',
+        session.currentRun.status,
+        session.currentRun.status === 'running' ? 'loading~spin' 
+          : session.currentRun.status === 'complete' ? 'check' 
+          : session.currentRun.status === 'queued' ? 'clock'
+          : 'warning',
+      ));
+
+      if (session.currentRun.prUrl) {
+        details.push(new PipelineDetailNode(
+          'PR', 
+          session.currentRun.prUrl.split('/').slice(-2).join('/'), 
+          'git-pull-request',
+        ));
+      }
     }
 
-    if (pipeline.worktreePath) {
-      details.push(new PipelineDetailNode('Worktree', pipeline.worktreePath, 'folder'));
+    if (session.branch) {
+      details.push(new PipelineDetailNode('Branch', session.branch, 'git-branch'));
     }
 
-    const elapsed = Math.round((Date.now() - pipeline.startedAt) / 1000);
-    details.push(new PipelineDetailNode('Running', formatElapsed(elapsed), 'clock'));
-
-    if (pipeline.lastEvent) {
-      const ev = pipeline.lastEvent as any;
-      const label = ev.type === 'task_update' ? `${ev.status}: ${ev.message?.slice(0, 40)}` : ev.type;
-      details.push(new PipelineDetailNode('Last Event', label, 'pulse'));
+    if (session.worktreePath) {
+      details.push(new PipelineDetailNode('Worktree', session.worktreePath, 'folder'));
     }
+
+    if (session.queuedRuns > 0) {
+      details.push(new PipelineDetailNode('Queued Runs', `${session.queuedRuns}`, 'layers'));
+    }
+
+    const elapsed = Math.round((Date.now() - session.lastActivityAt) / 1000);
+    details.push(new PipelineDetailNode('Last Activity', formatElapsed(elapsed) + ' ago', 'clock'));
 
     return details;
   }
@@ -150,20 +199,37 @@ export class PipelineProvider implements vscode.TreeDataProvider<PipelineNode> {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function phaseIcon(phase: string, status: string): vscode.ThemeIcon {
-  if (status === 'failed') return new vscode.ThemeIcon('error', new vscode.ThemeColor('charts.red'));
-  if (status === 'complete') return new vscode.ThemeIcon('check', new vscode.ThemeColor('charts.green'));
-  if (status === 'paused') return new vscode.ThemeIcon('debug-pause', new vscode.ThemeColor('charts.yellow'));
-
-  const icon = PHASE_ICONS[phase] ?? 'loading~spin';
-  return status === 'active'
-    ? new vscode.ThemeIcon(icon === 'loading~spin' ? icon : 'loading~spin', new vscode.ThemeColor('charts.blue'))
-    : new vscode.ThemeIcon(icon);
+function sessionIcon(phase: string, runStatus: string, sessionStatus: string): vscode.ThemeIcon {
+  if (sessionStatus === 'closed') {
+    return new vscode.ThemeIcon('archive', new vscode.ThemeColor('charts.gray'));
+  }
+  if (runStatus === 'failed') {
+    return new vscode.ThemeIcon('error', new vscode.ThemeColor('charts.red'));
+  }
+  if (runStatus === 'complete' || phase === 'complete') {
+    return new vscode.ThemeIcon('check', new vscode.ThemeColor('charts.green'));
+  }
+  if (runStatus === 'paused') {
+    return new vscode.ThemeIcon('debug-pause', new vscode.ThemeColor('charts.yellow'));
+  }
+  if (runStatus === 'queued') {
+    return new vscode.ThemeIcon('clock', new vscode.ThemeColor('charts.orange'));
+  }
+  if (runStatus === 'running') {
+    return new vscode.ThemeIcon('loading~spin', new vscode.ThemeColor('charts.blue'));
+  }
+  
+  // Idle session
+  return new vscode.ThemeIcon('circle-outline');
 }
 
 function formatElapsed(seconds: number): string {
   if (seconds < 60) return `${seconds}s`;
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m}m ${s}s`;
+  if (seconds < 3600) {
+    const m = Math.floor(seconds / 60);
+    return `${m}m`;
+  }
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return `${h}h ${m}m`;
 }

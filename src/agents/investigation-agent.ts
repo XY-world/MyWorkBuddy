@@ -12,7 +12,7 @@ export interface InvestigationResult {
 }
 
 export class InvestigationAgent extends BaseAgent {
-  readonly agentKey = 'dev' as const;   // reuse dev slot in memory
+  readonly agentKey = 'investigation' as const;
   readonly persona = 'Alex';
   readonly soul = `# You are Alex — Investigation Agent
 

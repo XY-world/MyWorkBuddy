@@ -47,9 +47,19 @@ Your secondary concern: Adherence to team standards and conventions.`;
       .map((cs, i) => `Task ${i + 1}: ${cs.summary} (files: ${cs.filesModified.join(', ')})`)
       .join('\n');
 
+    const DIFF_LIMIT = 20000;
+    const diffTruncated = diff.length > DIFF_LIMIT;
+    const displayDiff = diffTruncated
+      ? diff.slice(0, DIFF_LIMIT) + '\n... (diff truncated — review may be incomplete)'
+      : diff;
+
+    if (diffTruncated) {
+      this.log(session.id, phase, 'warn', `Diff truncated from ${diff.length} to ${DIFF_LIMIT} chars — review may miss changes`);
+    }
+
     const taskInstructions = `
 Review the following code changes for Work Item #${workItem.id}: ${workItem.title}
-
+${diffTruncated ? '\n⚠️ **WARNING: Diff was truncated. Some changes may not be visible.**\n' : ''}
 ## Work Item Requirements
 **Description:** ${workItem.description || '(none)'}
 **Acceptance Criteria:** ${workItem.acceptanceCriteria || '(none)'}
@@ -59,7 +69,7 @@ ${devSummaries || '(no summaries available)'}
 
 ## Full Git Diff
 \`\`\`diff
-${diff.slice(0, 20000)}${diff.length > 20000 ? '\n... (diff truncated)' : ''}
+${displayDiff}
 \`\`\`
 
 ---

@@ -1,12 +1,12 @@
 import { AdoWorkItem } from '../ado/work-items';
-import { WorkItemSession, Phase } from '../memory/session';
+import { Session } from '../memory/session';
 import { Task } from '../memory/tasks';
 import { appendAuditEvent, AuditEventType } from '../memory/audit';
-import { appendMessage } from '../memory/agent-messages';
 import { loadMemories, formatMemoriesForPrompt, makeRepoKey, AgentMemoryEntry } from '../memory/agent-memory';
 import { createCopilotSession, getCopilotMcpTools, ToolDefinition, ToolRegistry } from '../tools/copilot-client';
 import { PrCommentThread } from '../ado/pull-requests';
 import { getSettings } from '../config/settings-manager';
+import { ChatMessage, formatChatContextForPrompt } from '../memory/chat';
 
 export interface TaskPlan {
   branchName: string;
@@ -49,7 +49,7 @@ export interface PrFixResult {
 }
 
 export interface AgentContext {
-  session: WorkItemSession;
+  session: Session | any;  // Accept both old and new session types
   workItem: AdoWorkItem;
   tasks: Task[];
   repoPath: string;
@@ -63,6 +63,11 @@ export interface AgentContext {
   prCommentThreads?: PrCommentThread[];
   /** User-provided modification instructions from phase confirmation dialog */
   userFeedback?: string;
+  /** Chat context from session (summary + recent messages) */
+  chatContext?: {
+    summary: string | null;
+    recentMessages: ChatMessage[];
+  };
 }
 
 export interface AgentOutput {
@@ -70,7 +75,7 @@ export interface AgentOutput {
   summary: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   data: TaskPlan | CodeChangeSet | ReviewResult | WorkItemAnalysis | PrFixResult | any | null;
-  nextPhase?: Phase;
+  nextPhase?: string;
   newMemories?: Array<{ type: 'code_pattern' | 'team_preference' | 'lesson_learned' | 'standard'; key: string; value: string; confidence: number }>;
 }
 
@@ -106,6 +111,14 @@ export abstract class BaseAgent {
       `\n## Your Stakeholder Perspective\n${this.effectiveUserPerspective()}`,
     ];
     if (memoryBlock) parts.push(`\n## Your Memory of This Repository\n${memoryBlock}`);
+
+    // Include chat context if available
+    if (ctx.chatContext) {
+      const chatBlock = formatChatContextForPrompt(ctx.chatContext);
+      if (chatBlock) {
+        parts.push(`\n## Session Context (prior conversation with developer)\n${chatBlock}`);
+      }
+    }
 
     // Inject attached skills
     const agentCfg = getSettings().getAgentSettings(this.agentKey);
