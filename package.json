@@ -1,0 +1,197 @@
+{
+  "name": "myworkbuddy",
+  "version": "0.1.0",
+  "description": "Autonomous coding agent CLI + VSCode extension for Azure DevOps work items",
+  "type": "commonjs",
+  "engines": {
+    "vscode": "^1.80.0",
+    "node": ">=18.0.0"
+  },
+  "main": "./dist/extension/extension.js",
+  "bin": {
+    "myworkbuddy": "./bin/myworkbuddy.js"
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "myworkbuddy",
+          "title": "MyWorkBuddy",
+          "icon": "$(robot)"
+        }
+      ]
+    },
+    "views": {
+      "myworkbuddy": [
+        {
+          "id": "myworkbuddy.workItems",
+          "name": "Work Items",
+          "contextualTitle": "Azure DevOps Work Items"
+        },
+        {
+          "id": "myworkbuddy.pipelines",
+          "name": "Pipelines",
+          "contextualTitle": "Active AI Pipelines"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "myworkbuddy.refreshMyItems",
+        "title": "Refresh Work Items",
+        "icon": "$(refresh)",
+        "category": "MyWorkBuddy"
+      },
+      {
+        "command": "myworkbuddy.selectSprint",
+        "title": "Select Sprint",
+        "icon": "$(calendar)",
+        "category": "MyWorkBuddy"
+      },
+      {
+        "command": "myworkbuddy.selectTeam",
+        "title": "Select Team",
+        "icon": "$(organization)",
+        "category": "MyWorkBuddy"
+      },
+      {
+        "command": "myworkbuddy.startWorkflow",
+        "title": "Start AI Workflow",
+        "icon": "$(play)",
+        "category": "MyWorkBuddy"
+      },
+      {
+        "command": "myworkbuddy.stopPipeline",
+        "title": "Stop Pipeline",
+        "icon": "$(stop)",
+        "category": "MyWorkBuddy"
+      },
+      {
+        "command": "myworkbuddy.openWorktree",
+        "title": "Open Worktree in VSCode",
+        "icon": "$(folder-opened)",
+        "category": "MyWorkBuddy"
+      },
+      {
+        "command": "myworkbuddy.openInBrowser",
+        "title": "Open Work Item in Browser",
+        "icon": "$(link-external)",
+        "category": "MyWorkBuddy"
+      },
+      {
+        "command": "myworkbuddy.showLogs",
+        "title": "Show Pipeline Logs",
+        "icon": "$(output)",
+        "category": "MyWorkBuddy"
+      },
+      {
+        "command": "myworkbuddy.openPipelineDetail",
+        "title": "Open Pipeline Detail",
+        "icon": "$(open-preview)",
+        "category": "MyWorkBuddy"
+      },
+      {
+        "command": "myworkbuddy.openSettings",
+        "title": "Settings",
+        "icon": "$(gear)",
+        "category": "MyWorkBuddy"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "myworkbuddy.refreshMyItems",
+          "when": "view == myworkbuddy.workItems",
+          "group": "navigation"
+        },
+        {
+          "command": "myworkbuddy.selectSprint",
+          "when": "view == myworkbuddy.workItems",
+          "group": "navigation"
+        },
+        {
+          "command": "myworkbuddy.selectTeam",
+          "when": "view == myworkbuddy.workItems",
+          "group": "navigation"
+        },
+        {
+          "command": "myworkbuddy.openSettings",
+          "when": "view == myworkbuddy.workItems",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "myworkbuddy.startWorkflow",
+          "when": "view == myworkbuddy.workItems && viewItem == workItem",
+          "group": "inline"
+        },
+        {
+          "command": "myworkbuddy.openInBrowser",
+          "when": "view == myworkbuddy.workItems && viewItem == workItem",
+          "group": "inline"
+        },
+        {
+          "command": "myworkbuddy.openPipelineDetail",
+          "when": "view == myworkbuddy.pipelines && viewItem == pipeline",
+          "group": "inline@0"
+        },
+        {
+          "command": "myworkbuddy.showLogs",
+          "when": "view == myworkbuddy.pipelines && viewItem == pipeline",
+          "group": "inline@1"
+        },
+        {
+          "command": "myworkbuddy.stopPipeline",
+          "when": "view == myworkbuddy.pipelines && viewItem == pipeline",
+          "group": "inline@2"
+        },
+        {
+          "command": "myworkbuddy.openWorktree",
+          "when": "view == myworkbuddy.pipelines && viewItem == pipeline",
+          "group": "inline@3"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "build:web": "vite build",
+    "dev": "ts-node src/cli/index.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate"
+  },
+  "dependencies": {
+    "@azure/identity": "^4.4.1",
+    "@azure/keyvault-secrets": "^4.8.0",
+    "@fluentui/react-components": "^9.54.0",
+    "@fluentui/react-icons": "^2.0.245",
+    "@github/copilot-sdk": "^0.2.0",
+    "azure-devops-node-api": "^14.1.0",
+    "better-sqlite3": "^11.3.0",
+    "chalk": "^4.1.2",
+    "commander": "^12.1.0",
+    "drizzle-orm": "^0.45.2",
+    "listr2": "^8.2.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "sql.js": "^1.14.1"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^3.7.2",
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^22.5.0",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "@types/sql.js": "^1.4.11",
+    "@types/vscode": "^1.110.0",
+    "@vitejs/plugin-react": "^4.7.0",
+    "drizzle-kit": "^0.24.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.2"
+  }
+}
