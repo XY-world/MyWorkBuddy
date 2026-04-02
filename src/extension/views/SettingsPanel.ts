@@ -171,10 +171,10 @@ input[type=checkbox].toggle{width:auto}
 </style>
 </head>
 <body>
-<div class="tabs">
-  <div class="tab active" onclick="showTab('agents')">Agents</div>
-  <div class="tab" onclick="showTab('skills')">Skills</div>
-  <div class="tab" onclick="showTab('mcps')">MCPs</div>
+<div class="tabs" id="tabBar">
+  <div class="tab active" data-tab="agents">Agents</div>
+  <div class="tab" data-tab="skills">Skills</div>
+  <div class="tab" data-tab="mcps">MCPs</div>
 </div>
 <div class="content">
 
@@ -182,7 +182,7 @@ input[type=checkbox].toggle{width:auto}
   <div class="pane active" id="pane-agents">
     <div class="agent-list" id="agentList">
       ${Object.entries(AGENT_DISPLAY_NAMES).map(([k, label]) =>
-        `<div class="agent-item" id="agentBtn_${k}" onclick="selectAgent('${k}')">${label}</div>`
+        `<div class="agent-item" data-agent="${k}" id="agentBtn_${k}">${label}</div>`
       ).join('')}
     </div>
     <div class="agent-detail" id="agentDetail"><p style="opacity:.4;padding:20px">Select an agent to edit</p></div>
@@ -193,7 +193,7 @@ input[type=checkbox].toggle{width:auto}
     <div class="tab-scroll">
       <div class="section-header">
         <div class="section-title">Skills</div>
-        <button class="b-ok" onclick="newSkill()">+ Add Skill</button>
+        <button class="b-ok" data-new-skill>+ Add Skill</button>
       </div>
       <p style="font-size:.82em;opacity:.55;margin-bottom:16px">Skills are reusable prompt snippets attached to agents — they appear as "Team Standards & Practices" in the agent's system prompt.</p>
       <div id="skillsList"></div>
@@ -205,7 +205,7 @@ input[type=checkbox].toggle{width:auto}
     <div class="tab-scroll">
       <div class="section-header">
         <div class="section-title">MCP Servers</div>
-        <button class="b-ok" onclick="newMcp()">+ Add MCP</button>
+        <button class="b-ok" data-new-mcp>+ Add MCP</button>
       </div>
       <p style="font-size:.82em;opacity:.55;margin-bottom:16px">Configure MCP (Model Context Protocol) servers. The built-in GitHub Copilot entry exposes all MCP tools registered in your VSCode Copilot settings — no extra config needed.</p>
       <div id="mcpsList"></div>
@@ -231,6 +231,66 @@ window.addEventListener('message', e => {
 });
 
 renderAll();
+
+// ── Event Delegation ────────────────────────────────────────────────────────
+// Use event delegation instead of inline onclick to work with CSP
+
+document.getElementById('tabBar')?.addEventListener('click', e => {
+  const tab = (e.target as HTMLElement).closest('[data-tab]');
+  if (tab) showTab(tab.getAttribute('data-tab') || 'agents');
+});
+
+document.getElementById('agentList')?.addEventListener('click', e => {
+  const item = (e.target as HTMLElement).closest('[data-agent]');
+  if (item) selectAgent(item.getAttribute('data-agent') || '');
+});
+
+document.getElementById('skillsList')?.addEventListener('click', e => {
+  const target = e.target as HTMLElement;
+  const btn = target.closest('button');
+  if (!btn) return;
+  const action = btn.getAttribute('data-action');
+  const id = btn.getAttribute('data-id') || '';
+  if (action === 'edit-skill') editSkill(id);
+  else if (action === 'delete-skill') deleteSkill(id);
+  else if (action === 'save-skill') saveSkill(id);
+  else if (action === 'cancel-skill') cancelSkill();
+});
+
+document.getElementById('mcpsList')?.addEventListener('click', e => {
+  const target = e.target as HTMLElement;
+  const btn = target.closest('button');
+  const toggle = target.closest('input[type="checkbox"]') as HTMLInputElement;
+  if (btn) {
+    const action = btn.getAttribute('data-action');
+    const id = btn.getAttribute('data-id') || '';
+    if (action === 'edit-mcp') editMcp(id);
+    else if (action === 'delete-mcp') deleteMcp(id);
+    else if (action === 'save-mcp') saveMcp(id);
+    else if (action === 'cancel-mcp') cancelMcp();
+  }
+  if (toggle && toggle.hasAttribute('data-mcp-toggle')) {
+    toggleMcp(toggle.getAttribute('data-mcp-toggle') || '', toggle.checked);
+  }
+});
+
+document.querySelector('.section-header')?.addEventListener('click', e => {
+  const btn = (e.target as HTMLElement).closest('button');
+  if (btn?.hasAttribute('data-new-skill')) newSkill();
+  if (btn?.hasAttribute('data-new-mcp')) newMcp();
+});
+
+// Skills pane header
+document.getElementById('pane-skills')?.addEventListener('click', e => {
+  const btn = (e.target as HTMLElement).closest('button[data-new-skill]');
+  if (btn) newSkill();
+});
+
+// MCPs pane header
+document.getElementById('pane-mcps')?.addEventListener('click', e => {
+  const btn = (e.target as HTMLElement).closest('button[data-new-mcp]');
+  if (btn) newMcp();
+});
 
 function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
@@ -310,9 +370,15 @@ function renderAgentDetail(key){
 <div class="check-group">\${skillHtml}</div>
 
 <div class="btn-row">
-  <button class="b-ok" onclick="saveAgent('\${key}')">Save</button>
-  <button class="b-2nd" onclick="resetAgent('\${key}')">Reset to Defaults</button>
+  <button class="b-ok" data-action="save-agent" data-id="\${key}">Save</button>
+  <button class="b-2nd" data-action="reset-agent" data-id="\${key}">Reset to Defaults</button>
 </div>\`;
+
+  // Attach event listeners after rendering
+  setTimeout(() => {
+    document.querySelector('[data-action="save-agent"]')?.addEventListener('click', () => saveAgent(key));
+    document.querySelector('[data-action="reset-agent"]')?.addEventListener('click', () => resetAgent(key));
+  }, 0);
 }
 
 function toolChanged(key, cb){ /* handled on save */ }
@@ -353,8 +419,8 @@ function renderSkills(){
   <div class="card-tags">\${s.tags.map(t=>\`<span class="tag">\${esc(t)}</span>\`).join('')}</div>
   <div style="font-size:.78em;opacity:.6;margin-bottom:8px;white-space:pre-wrap">\${esc(s.promptText.slice(0,120))}\${s.promptText.length>120?'…':''}</div>
   <div class="card-actions">
-    <button class="b-2nd" onclick="editSkill('\${esc(s.id)}')">Edit</button>
-    <button class="b-danger" onclick="deleteSkill('\${esc(s.id)}')">Delete</button>
+    <button class="b-2nd" data-action="edit-skill" data-id="\${esc(s.id)}">Edit</button>
+    <button class="b-danger" data-action="delete-skill" data-id="\${esc(s.id)}">Delete</button>
   </div>
 </div>\`;
   }).join('') + (_editingSkillId==='__new__' ? renderSkillForm(null) : '');
@@ -369,8 +435,8 @@ function renderSkillForm(s){
   <textarea id="sk_prompt_\${id}" rows="4">\${s?esc(s.promptText):''}</textarea>
   <label>Tags (comma-separated)</label><input type="text" id="sk_tags_\${id}" value="\${s?esc(s.tags.join(', ')):''}">
   <div class="btn-row">
-    <button class="b-ok" onclick="saveSkill('\${id}')">Save</button>
-    <button class="b-2nd" onclick="cancelSkill()">Cancel</button>
+    <button class="b-ok" data-action="save-skill" data-id="\${id}">Save</button>
+    <button class="b-2nd" data-action="cancel-skill">Cancel</button>
   </div>
 </div>\`;
 }
@@ -410,13 +476,13 @@ function renderMcps(){
     return \`<div class="card">
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
     <div class="card-title" style="flex:1">\${esc(m.name)}</div>
-    <label class="toggle-row" style="margin:0"><input type="checkbox" class="toggle" \${m.enabled?'checked':''} onchange="toggleMcp('\${esc(m.id)}',this.checked)"> Enabled</label>
+    <label class="toggle-row" style="margin:0"><input type="checkbox" class="toggle" data-mcp-toggle="\${esc(m.id)}" \${m.enabled?'checked':''}> Enabled</label>
   </div>
   \${!isBuiltin?'<div class="card-desc">'+esc(m.command)+' '+esc(m.args.join(' '))+'</div>':'<div class="card-desc" style="opacity:.45">Built-in — uses vscode.lm.tools from GitHub Copilot</div>'}
   \${toolBlock}
   <div class="card-actions" style="margin-top:8px">
-    \${!isBuiltin?'<button class="b-2nd" onclick="editMcp(\''+esc(m.id)+'\')">Edit</button>':''}
-    \${!isBuiltin?'<button class="b-danger" onclick="deleteMcp(\''+esc(m.id)+'\')">Delete</button>':''}
+    \${!isBuiltin?'<button class="b-2nd" data-action="edit-mcp" data-id="'+esc(m.id)+'">Edit</button>':''}
+    \${!isBuiltin?'<button class="b-danger" data-action="delete-mcp" data-id="'+esc(m.id)+'">Delete</button>':''}
   </div>
 </div>\`;
   }).join('') + (_editingMcpId==='__new__' ? renderMcpForm(null) : '');
@@ -432,8 +498,8 @@ function renderMcpForm(m){
   <label>Environment Variables (KEY=VALUE, one per line)</label><textarea id="mc_env_\${id}" rows="3">\${esc(envStr)}</textarea>
   <div class="toggle-row"><input type="checkbox" class="toggle" id="mc_en_\${id}" \${(!m||m.enabled)?'checked':''}><label for="mc_en_\${id}" style="margin:0">Enabled</label></div>
   <div class="btn-row">
-    <button class="b-ok" onclick="saveMcp('\${id}')">Save</button>
-    <button class="b-2nd" onclick="cancelMcp()">Cancel</button>
+    <button class="b-ok" data-action="save-mcp" data-id="\${id}">Save</button>
+    <button class="b-2nd" data-action="cancel-mcp">Cancel</button>
   </div>
 </div>\`;
 }
