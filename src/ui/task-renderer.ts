@@ -1,10 +1,10 @@
 import { Listr, ListrTask } from 'listr2';
 import chalk from 'chalk';
 import { Task } from '../memory/tasks';
-import { WorkItemSession } from '../memory/session';
+import { Session, WorkItemSession } from '../memory/session';
 import { agentLabel, statusBadge } from './formatters';
 
-export function buildTaskList(session: WorkItemSession, tasks: Task[]): Listr {
+export function buildTaskList(session: Session | WorkItemSession, tasks: Task[]): Listr {
   const listrTasks: ListrTask[] = tasks.map((t) => ({
     title: `${agentLabel(t.agent)} ${t.title}`,
     task: (_ctx: unknown, task: any) => {

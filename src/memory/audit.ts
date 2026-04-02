@@ -74,3 +74,10 @@ function parseEvent(row: unknown): AuditEvent {
     metadata: r.metadataJson ? JSON.parse(r.metadataJson as string) : undefined,
   };
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Legacy compatibility
+// ══════════════════════════════════════════════════════════════════════════════
+
+/** @deprecated Use getAuditEventsForSession instead */
+export const getAuditLog = getAuditEventsForSession;

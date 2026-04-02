@@ -377,6 +377,16 @@ export class PipelineManager extends EventEmitter {
     return this.activeRunners.get(sessionId)?.runner;
   }
 
+  /** Get runner by work item ID (for extension compatibility) */
+  getRunnerByWorkItem(workItemId: number): PipelineRunner | undefined {
+    for (const [, entry] of this.activeRunners) {
+      if (entry.runner.workItemId === workItemId) {
+        return entry.runner;
+      }
+    }
+    return undefined;
+  }
+
   getStats(): { activeSessions: number; queuedRuns: number; maxConcurrency: number } {
     let queuedRuns = 0;
     for (const q of this.sessionQueues.values()) {

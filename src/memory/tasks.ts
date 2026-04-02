@@ -112,3 +112,10 @@ export function resetDevTasksForRun(pipelineRunId: number): void {
     ))
     .run();
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Legacy compatibility
+// ══════════════════════════════════════════════════════════════════════════════
+
+/** @deprecated Use getTasksForRun instead */
+export const getTasksForSession = getTasksForRun;

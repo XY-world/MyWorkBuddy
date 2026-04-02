@@ -61,7 +61,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // Auto-refresh pipeline panel every 5s while pipelines are active (keeps timer ticking)
   const refreshTimer = setInterval(() => {
-    if (pipelineManager.getAll().length > 0) {
+    if (pipelineManager.getAllSessions().length > 0) {
       pipelineProvider.refresh();
       statusBar.refresh();
     }
@@ -76,7 +76,7 @@ export function activate(context: vscode.ExtensionContext): void {
     const detailPanel = PipelineDetailPanel.getPanel(workItemId);
     if (detailPanel) {
       detailPanel.handleEvent(e);
-      const status = pipelineManager.getAll().find((p) => p.workItemId === workItemId);
+      const status = pipelineManager.getAllSessions().find((p: any) => p.workItemId === workItemId);
       if (status?.worktreePath) detailPanel.setWorktreePath(status.worktreePath);
     }
 
@@ -89,9 +89,9 @@ export function activate(context: vscode.ExtensionContext): void {
       if (dp) {
         dp.proceedAnywayCallback = () => {
           dp.proceedAnywayCallback = undefined;
-          const orch = pipelineManager.getOrchestrator(workItemId);
-          if (orch) {
-            orch.forceResumeFromWiReview().catch((err) => {
+          const runner = pipelineManager.getRunnerByWorkItem(workItemId);
+          if (runner) {
+            runner.forceResumeFromWiReview().catch((err: any) => {
               vscode.window.showErrorMessage(`Resume failed: ${err.message}`);
             });
           }
@@ -100,7 +100,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   });
   pipelineManager.on('pipeline_started', (workItemId: number) => {
-    const title = pipelineManager.getAll().find((p) => p.workItemId === workItemId)?.title ?? '';
+    const title = pipelineManager.getAllSessions().find((p: any) => p.workItemId === workItemId)?.title ?? '';
     logger.create(workItemId, title);
     pipelineProvider.refresh();
     statusBar.refresh();

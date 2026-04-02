@@ -2,12 +2,12 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { getConfig } from '../../config/manager';
 import { runMigrations } from '../../db/migrate';
-import { getAllSessions, updateSessionPhase, updateSessionStatus } from '../../memory/session';
-import { Orchestrator, SseEvent } from '../../agents/orchestrator';
-import { Phase } from '../../memory/session';
+import { getAllSessions, reopenSession } from '../../memory/session';
+import { createPipelineRun, RunPhase } from '../../memory/pipeline-run';
+import { PipelineRunner, SseEvent } from '../../agents/pipeline-runner';
 import { banner, phaseBanner } from '../../ui/formatters';
 
-const VALID_STAGES: Phase[] = ['planning', 'development', 'review', 'pr_creation'];
+const VALID_STAGES: RunPhase[] = ['planning', 'development', 'review', 'pr_creation'];
 
 export function retryCommand(): Command {
   return new Command('retry')
@@ -18,7 +18,7 @@ export function retryCommand(): Command {
       runMigrations();
 
       const workItemId = parseInt(workItemIdStr, 10);
-      const stage = opts.fromStage as Phase;
+      const stage = opts.fromStage as RunPhase;
 
       if (!VALID_STAGES.includes(stage)) {
         console.error(chalk.red(`Invalid stage "${stage}". Valid: ${VALID_STAGES.join(', ')}`));
@@ -32,15 +32,21 @@ export function retryCommand(): Command {
       }
 
       const session = sessions[sessions.length - 1];
-      updateSessionPhase(session.id, stage);
-      updateSessionStatus(session.id, 'active');
+      reopenSession(session.id);
 
       console.log(chalk.gray(`\nResuming session ${session.id} for WI #${workItemId} from phase: ${stage}\n`));
 
       banner(`Work Item #${workItemId}`, `Resuming from: ${stage}`);
 
-      const orch = new Orchestrator();
-      orch.on('event', (e: SseEvent) => {
+      // Create a new pipeline run starting from the specified phase
+      const pipelineRun = createPipelineRun({
+        sessionId: session.id,
+        type: 'retry',
+        triggeredBy: 'cli',
+      });
+      const runner = new PipelineRunner();
+      
+      runner.on('event', (e: SseEvent) => {
         if (e.type === 'phase_change') phaseBanner(`PHASE: ${e.phase.toUpperCase()}`);
         if (e.type === 'task_update' && e.status === 'done') console.log(`  ${chalk.green('✔')}  ${e.message}`);
         if (e.type === 'task_update' && e.status === 'failed') console.log(`  ${chalk.red('✖')}  ${e.message}`);
@@ -49,7 +55,7 @@ export function retryCommand(): Command {
       });
 
       try {
-        await orch.run({ workItemId, sessionId: session.id });
+        await runner.execute({ session, run: pipelineRun });
       } catch (err: any) {
         console.error(chalk.red(`\nRetry failed: ${err.message}`));
         process.exit(1);

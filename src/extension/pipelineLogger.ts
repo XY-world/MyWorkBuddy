@@ -111,7 +111,7 @@ function eventToLine(event: SseEvent): string {
       return `✔ PR Fix: ${event.commentsFixed} comment(s) fixed | commit: ${event.commitHash}`;
     case 'phase_complete':
       return ''; // handled by logPhaseSummary — suppress inline duplicate
-    case 'session_complete':
+    case 'run_complete':
       return '\n✔ Pipeline complete!';
     case 'error':
       return `✖ Error in [${event.phase}]: ${event.message}`;

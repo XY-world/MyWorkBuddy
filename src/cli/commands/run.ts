@@ -2,9 +2,12 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { getConfig } from '../../config/manager';
 import { runMigrations } from '../../db/migrate';
-import { Orchestrator, SseEvent } from '../../agents/orchestrator';
+import { PipelineRunner, SseEvent } from '../../agents/pipeline-runner';
 import { banner, phaseBanner, statusBadge, agentLabel, printReviewResult } from '../../ui/formatters';
-import { getTasksForSession } from '../../memory/tasks';
+import { getTasksForRun } from '../../memory/tasks';
+import { getOrCreateSession } from '../../memory/session';
+import { createPipelineRun } from '../../memory/pipeline-run';
+import { getWorkItem } from '../../ado/work-items';
 
 export function runCommand(): Command {
   return new Command('run')
@@ -25,6 +28,7 @@ export function runCommand(): Command {
       }
 
       const cfg = getConfig();
+      const cfgAll = cfg.getAll();
       if (!cfg.isConfigured()) {
         console.error(chalk.red('myworkbuddy is not configured. Run: myworkbuddy init'));
         process.exit(1);
@@ -32,55 +36,72 @@ export function runCommand(): Command {
 
       banner(`Work Item #${workItemId}`, opts.dryRun ? 'DRY RUN — plan only' : 'via GitHub Copilot CLI');
 
-      const orch = new Orchestrator();
-      let sessionId: number | undefined;
       const startTime = Date.now();
 
-      orch.on('event', (e: SseEvent) => {
-        switch (e.type) {
-          case 'phase_change':
-            phaseBanner(`PHASE: ${e.phase.toUpperCase()}`);
-            break;
-
-          case 'task_update':
-            if (e.status === 'running') {
-              process.stdout.write(`  ${chalk.yellow('↻')}  ${e.message}\n`);
-            } else if (e.status === 'done') {
-              process.stdout.write(`  ${chalk.green('✔')}  ${chalk.gray(e.message)}\n`);
-            } else if (e.status === 'failed') {
-              process.stdout.write(`  ${chalk.red('✖')}  ${chalk.red(e.message)}\n`);
-            }
-            break;
-
-          case 'agent_complete':
-            console.log(chalk.gray(`\n  Agent complete: ${e.agent} — ${e.summary}`));
-            break;
-
-          case 'review_result':
-            break; // printed separately
-
-          case 'pr_created':
-            console.log(`\n  ${chalk.green('✔')} PR created: ${chalk.cyan(e.prUrl)}`);
-            break;
-
-          case 'error':
-            console.log(`\n  ${chalk.red('✖')} Error in ${e.phase}: ${e.message}`);
-            break;
-
-          case 'session_complete':
-            // summary printed below
-            break;
-        }
-      });
-
       try {
-        await orch.run({
+        // Get work item info
+        const project = opts.project || cfgAll.ado.wiProject;
+        const workItem = await getWorkItem(project, workItemId);
+
+        // Get or create session
+        const { session } = getOrCreateSession({
           workItemId,
-          project: opts.project,
-          repo: opts.repo,
-          orgUrl: opts.org,
+          adoOrg: cfgAll.ado.orgUrl || opts.org,
+          project,
+          repo: opts.repo || cfgAll.ado.defaultRepo,
+          title: workItem.title,
+        });
+
+        // Create pipeline run
+        const pipelineRun = createPipelineRun({
+          sessionId: session.id,
+          type: 'full',
+          triggeredBy: 'cli',
+        });
+
+        const runner = new PipelineRunner();
+
+        runner.on('event', (e: SseEvent) => {
+          switch (e.type) {
+            case 'phase_change':
+              phaseBanner(`PHASE: ${e.phase.toUpperCase()}`);
+              break;
+
+            case 'task_update':
+              if (e.status === 'running') {
+                process.stdout.write(`  ${chalk.yellow('↻')}  ${e.message}\n`);
+              } else if (e.status === 'done') {
+                process.stdout.write(`  ${chalk.green('✔')}  ${chalk.gray(e.message)}\n`);
+              } else if (e.status === 'failed') {
+                process.stdout.write(`  ${chalk.red('✖')}  ${chalk.red(e.message)}\n`);
+              }
+              break;
+
+            case 'agent_complete':
+              console.log(chalk.gray(`\n  Agent complete: ${e.agent} — ${e.summary}`));
+              break;
+
+            case 'review_result':
+              break; // printed separately
+
+            case 'pr_created':
+              console.log(`\n  ${chalk.green('✔')} PR created: ${chalk.cyan(e.prUrl)}`);
+              break;
+
+            case 'error':
+              console.log(`\n  ${chalk.red('✖')} Error in ${e.phase}: ${e.message}`);
+              break;
+
+            case 'run_complete':
+              // summary printed below
+              break;
+          }
+        });
+
+        await runner.execute({
+          session,
+          run: pipelineRun,
           repoLocalPath: opts.repoPath,
-          dryRun: opts.dryRun,
         });
       } catch (err: any) {
         console.error(`\n${chalk.red('✖')} Pipeline failed: ${err.message}`);

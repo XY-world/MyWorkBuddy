@@ -220,3 +220,17 @@ function parseMessage(row: unknown): ChatMessage {
     createdAt: r.createdAt as number,
   };
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Convenience aliases for VSCode extension
+// ══════════════════════════════════════════════════════════════════════════════
+
+/** Alias for getChatMessages */
+export const getMessages = getChatMessages;
+
+/** Convenience wrapper for appendChatMessage */
+export function addMessage(sessionId: number, role: 'user' | 'assistant' | 'sam', content: string, pipelineRunId?: number): ChatMessage {
+  // Normalize role: 'assistant' -> 'sam'
+  const normalizedRole = role === 'assistant' ? 'sam' : role as 'user' | 'sam';
+  return appendChatMessage({ sessionId, role: normalizedRole, content, pipelineRunId });
+}

@@ -3,6 +3,7 @@ import { Session } from '../memory/session';
 import { Task } from '../memory/tasks';
 import { appendAuditEvent, AuditEventType } from '../memory/audit';
 import { loadMemories, formatMemoriesForPrompt, makeRepoKey, AgentMemoryEntry } from '../memory/agent-memory';
+import { appendMessage } from '../memory/agent-messages';
 import { createCopilotSession, getCopilotMcpTools, ToolDefinition, ToolRegistry } from '../tools/copilot-client';
 import { PrCommentThread } from '../ado/pull-requests';
 import { getSettings } from '../config/settings-manager';
@@ -80,7 +81,7 @@ export interface AgentOutput {
 }
 
 export abstract class BaseAgent {
-  abstract readonly agentKey: 'pm' | 'dev' | 'review' | 'wi_review' | 'pr_fix';
+  abstract readonly agentKey: 'pm' | 'dev' | 'review' | 'wi_review' | 'pr_fix' | 'investigation';
   abstract readonly persona: string;
   abstract readonly soul: string;
   abstract readonly userPerspective: string;
@@ -159,12 +160,12 @@ export abstract class BaseAgent {
   }
 
   protected async chat(
-    sessionId: number,
+    pipelineRunId: number,
     systemPrompt: string,
     userMessage: string,
   ): Promise<string> {
-    appendMessage(sessionId, this.agentKey, 'system', systemPrompt);
-    appendMessage(sessionId, this.agentKey, 'user', userMessage);
+    appendMessage(pipelineRunId, this.agentKey, 'system', systemPrompt);
+    appendMessage(pipelineRunId, this.agentKey, 'user', userMessage);
 
     const session = await createCopilotSession(systemPrompt);
     let responseText = '';
@@ -175,19 +176,19 @@ export abstract class BaseAgent {
       await session.close();
     }
 
-    appendMessage(sessionId, this.agentKey, 'assistant', responseText);
+    appendMessage(pipelineRunId, this.agentKey, 'assistant', responseText);
     return responseText;
   }
 
   protected async chatWithTools(
-    sessionId: number,
+    pipelineRunId: number,
     systemPrompt: string,
     userMessage: string,
     maxIterations = 10,
     onToolCall?: (name: string, args: unknown, result: unknown) => void,
   ): Promise<string> {
-    appendMessage(sessionId, this.agentKey, 'system', systemPrompt);
-    appendMessage(sessionId, this.agentKey, 'user', userMessage);
+    appendMessage(pipelineRunId, this.agentKey, 'system', systemPrompt);
+    appendMessage(pipelineRunId, this.agentKey, 'user', userMessage);
 
     const copilotSession = await createCopilotSession(systemPrompt);
     let lastResponse = '';
@@ -200,7 +201,7 @@ export abstract class BaseAgent {
         });
 
         lastResponse = response.text;
-        appendMessage(sessionId, this.agentKey, 'assistant', lastResponse);
+        appendMessage(pipelineRunId, this.agentKey, 'assistant', lastResponse);
 
         if (lastResponse.includes('"done": true') || lastResponse.includes('"done":true')) {
           break;

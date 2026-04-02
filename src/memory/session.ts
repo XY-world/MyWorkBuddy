@@ -182,3 +182,31 @@ export function reopenSession(id: number): void {
     .where(eq(sessions.id, id))
     .run();
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Legacy compatibility (for CLI commands)
+// ══════════════════════════════════════════════════════════════════════════════
+
+/** @deprecated Use Session.status instead */
+export type Phase = string;
+
+/** @deprecated Session no longer has direct phase - check pipeline_runs */
+export function updateSessionPhase(_id: number, _phase: string): void {
+  // No-op - phase is now on pipeline_runs
+  console.warn('[DEPRECATED] updateSessionPhase called - phase is now on pipeline_runs');
+}
+
+/** @deprecated Use closeSession() instead */
+export function updateSessionStatus(id: number, status: 'active' | 'closed'): void {
+  if (status === 'closed') {
+    closeSession(id, 'manual');
+  } else {
+    reopenSession(id);
+  }
+}
+
+/** @deprecated Use WorkItemSession for backwards compat */
+export interface WorkItemSession extends Session {
+  phase?: string;
+  prUrl?: string;
+}

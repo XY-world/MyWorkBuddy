@@ -5,6 +5,8 @@ import * as os from 'os';
 import { SseEvent, PhaseCompleteSummary } from '../../agents/orchestrator';
 import { ManagerAgent, ChatMessage, PipelineBlueprint, VsAction } from '../../agents/manager-agent';
 import { getChangedFilesVsBranch, getFileContentAtRef } from '../../tools/git-tools';
+import { getMessages, addMessage, ChatMessage as DbChatMessage } from '../../memory/chat';
+import { getOrCreateSession } from '../../memory/session';
 
 // ── State types ──────────────────────────────────────────────────────────────
 
@@ -81,6 +83,9 @@ export class PipelineDetailPanel {
   private readonly panel: vscode.WebviewPanel;
   private htmlInitialized = false;
   private manager: ManagerAgent;
+
+  // Session tracking
+  private sessionId: number | null = null;
 
   // Timeline state
   private phases = new Map<string, PhaseEntry>();
@@ -279,7 +284,7 @@ export class PipelineDetailPanel {
         break;
       }
 
-      case 'session_complete': {
+      case 'run_complete': {
         this.sessionStatus = 'complete';
         const e = this.phases.get('complete');
         if (e) { e.status = 'complete'; e.completedAt = Date.now(); }
@@ -345,7 +350,7 @@ export class PipelineDetailPanel {
 
   private async handleUserChat(text: string | undefined): Promise<void> {
     if (!text) return;
-    this.chatHistory.push({ role: 'user', text, timestamp: Date.now() });
+    this.addUserMessage(text);
     this.samThinking = true;
     this.push();
 
@@ -426,6 +431,43 @@ export class PipelineDetailPanel {
 
   private addSamMessage(text: string): void {
     this.chatHistory.push({ role: 'sam', text, timestamp: Date.now() });
+    // Persist to database if session is known
+    if (this.sessionId) {
+      addMessage(this.sessionId, 'assistant', text);
+    }
+  }
+
+  private addUserMessage(text: string): void {
+    this.chatHistory.push({ role: 'user', text, timestamp: Date.now() });
+    // Persist to database if session is known
+    if (this.sessionId) {
+      addMessage(this.sessionId, 'user', text);
+    }
+  }
+
+  /** Set the session ID and load chat history from database */
+  setSessionId(sessionId: number): void {
+    if (this.sessionId === sessionId) return;
+    this.sessionId = sessionId;
+    this.loadChatHistory();
+  }
+
+  private loadChatHistory(): void {
+    if (!this.sessionId) return;
+    try {
+      const dbMessages = getMessages(this.sessionId);
+      // Convert DB format to panel format
+      this.chatHistory = dbMessages
+        .filter(m => !m.isCompressed)
+        .map(m => ({
+          role: m.role === 'user' ? 'user' as const : 'sam' as const,
+          text: m.content,
+          timestamp: m.createdAt,
+        }));
+      this.push();
+    } catch {
+      // DB not ready, keep empty
+    }
   }
 
   private buildPipelineContext(): string {

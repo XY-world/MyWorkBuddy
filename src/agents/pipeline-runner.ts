@@ -105,6 +105,20 @@ export class PipelineRunner extends EventEmitter {
   private blueprint?: PipelineBlueprint;
   private investigationOutput?: any;
 
+  /** Get the work item ID for this runner */
+  get workItemId(): number {
+    return this.session?.workItemId ?? 0;
+  }
+
+  /** Force resume from WI review blocked state */
+  async forceResumeFromWiReview(): Promise<void> {
+    if (this.run?.phase === 'wi_review') {
+      this.transition('planning');
+      // Continue with the pipeline
+      await this.phasePlanning();
+    }
+  }
+
   emit(event: string, data?: SseEvent): boolean {
     return super.emit(event, data);
   }
@@ -665,7 +679,7 @@ export class PipelineRunner extends EventEmitter {
     this.transition('pr_monitoring');
 
     // Compress chat context if needed
-    await maybeCompressContext(this.session.id, this.session.contextSummary);
+    await maybeCompressContext(this.session.id, this.session.contextSummary ?? undefined);
 
     this.sse({ type: 'run_complete' });
   }
@@ -825,7 +839,7 @@ export class PipelineRunner extends EventEmitter {
     }
 
     completeRun(this.run.id);
-    await maybeCompressContext(this.session.id, this.session.contextSummary);
+    await maybeCompressContext(this.session.id, this.session.contextSummary ?? undefined);
     this.sse({ type: 'run_complete' });
   }
 }

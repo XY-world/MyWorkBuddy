@@ -3,6 +3,7 @@ import chalk from 'chalk';
 import { runMigrations } from '../../db/migrate';
 import { getAllSessions, getSession } from '../../memory/session';
 import { getTasksForSession } from '../../memory/tasks';
+import { getLatestRunForSession } from '../../memory/pipeline-run';
 import { statusBadge, agentLabel, formatRelativeTime } from '../../ui/formatters';
 
 export function statusCommand(): Command {
@@ -20,10 +21,12 @@ export function statusCommand(): Command {
           return;
         }
         const session = sessions[sessions.length - 1]; // latest
-        const tasks = getTasksForSession(session.id);
+        const latestRun = getLatestRunForSession(session.id);
+        const tasks = latestRun ? getTasksForSession(latestRun.id) : [];
+        const phase = latestRun?.phase ?? 'idle';
 
         console.log(chalk.bold(`\n  myworkbuddy · WI #${session.workItemId}: ${session.title}`));
-        console.log(chalk.gray(`  Phase: ${session.phase.toUpperCase()}  ·  Branch: ${session.branch || '(none)'}  ·  Started: ${formatRelativeTime(session.createdAt)}\n`));
+        console.log(chalk.gray(`  Phase: ${phase.toUpperCase()}  ·  Branch: ${session.branch || '(none)'}  ·  Started: ${formatRelativeTime(session.createdAt)}\n`));
 
         const done = tasks.filter((t) => t.status === 'done').length;
         const total = tasks.length;
@@ -42,7 +45,7 @@ export function statusCommand(): Command {
         console.log('  ' + '─'.repeat(72));
         console.log(chalk.gray(`  Progress: ${bar}  ${done} / ${total} tasks  (${pct}%)`));
 
-        if (session.prUrl) console.log(`\n  PR: ${chalk.cyan(session.prUrl)}`);
+        if (latestRun?.prUrl) console.log(`\n  PR: ${chalk.cyan(latestRun.prUrl)}`);
         console.log();
 
       } else {
@@ -59,12 +62,14 @@ export function statusCommand(): Command {
         console.log('  ' + '─'.repeat(75));
 
         for (const s of sessions) {
-          const tasks = getTasksForSession(s.id);
-          const done = tasks.filter((t) => t.status === 'done').length;
+          const latestRun = getLatestRunForSession(s.id);
+          const tasks = latestRun ? getTasksForSession(latestRun.id) : [];
+          const done = tasks.filter((t: any) => t.status === 'done').length;
           const total = tasks.length;
           const badge = statusBadge(s.status);
+          const phase = latestRun?.phase ?? 'idle';
           console.log(
-            `  ${badge} ${s.id.toString().padEnd(3)} ${s.workItemId.toString().padEnd(6)} ${(s.title || '(untitled)').slice(0, 34).padEnd(35)} ${s.phase.padEnd(14)} ${`${done}/${total}`.padEnd(8)} ${formatRelativeTime(s.createdAt)}`,
+            `  ${badge} ${s.id.toString().padEnd(3)} ${s.workItemId.toString().padEnd(6)} ${(s.title || '(untitled)').slice(0, 34).padEnd(35)} ${phase.padEnd(14)} ${`${done}/${total}`.padEnd(8)} ${formatRelativeTime(s.createdAt)}`,
           );
         }
         console.log('  ' + '─'.repeat(75));

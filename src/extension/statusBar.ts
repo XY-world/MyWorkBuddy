@@ -23,15 +23,15 @@ export class StatusBarManager implements vscode.Disposable {
   }
 
   refresh(): void {
-    const pipelines = this.pipelineManager.getAll();
-    const active = pipelines.filter((p) => p.status === 'active');
+    const sessions = this.pipelineManager.getAllSessions();
+    const active = sessions.filter((s: any) => s.sessionStatus === 'active' && s.currentRun?.status === 'running');
 
     if (active.length === 0) {
       this.item.text = '$(robot) MyWorkBuddy';
       this.item.backgroundColor = undefined;
     } else {
       const phaseLabel = active.length === 1
-        ? formatPhase(active[0].phase)
+        ? formatPhase(active[0].currentRun?.phase ?? 'running')
         : `${active.length} pipelines`;
       this.item.text = `$(loading~spin) ${phaseLabel}`;
       this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');

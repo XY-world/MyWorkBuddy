@@ -59,11 +59,8 @@ export function registerCommands(
       }
 
       // Check if session is already active
-      const existingStatus = pipelineManager.getSessionStatus(
-        // We don't have sessionId here, need to check by workItemId
-        // For now, use getAllSessions to find it
-        ...pipelineManager.getAllSessions().filter(s => s.workItemId === wi.id).map(s => s.sessionId)
-      );
+      const existingSessions = pipelineManager.getAllSessions().filter(s => s.workItemId === wi.id);
+      const existingStatus = existingSessions.length > 0 ? existingSessions[0] : null;
 
       if (existingStatus && pipelineManager.isSessionActive(existingStatus.sessionId)) {
         const action = await vscode.window.showWarningMessage(
@@ -131,6 +128,9 @@ export function registerCommands(
           triggeredBy: 'user',
         }, detailPanel.awaitConfirmation.bind(detailPanel),
            detailPanel.awaitBlueprintConfirmation.bind(detailPanel));
+
+        // Connect panel to session for persistent chat
+        detailPanel.setSessionId(sessionId);
 
         logger.create(wi.id, wi.title);
         vscode.window.showInformationMessage(
@@ -221,7 +221,8 @@ export function registerCommands(
 
     vscode.commands.registerCommand('myworkbuddy.openPipelineDetail', (node: SessionRootNode) => {
       if (!(node instanceof SessionRootNode)) return;
-      PipelineDetailPanel.createOrShow(node.session.workItemId, node.session.title, context);
+      const panel = PipelineDetailPanel.createOrShow(node.session.workItemId, node.session.title, context);
+      panel.setSessionId(node.session.sessionId);
     }),
   ];
 }

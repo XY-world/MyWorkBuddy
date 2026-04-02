@@ -20,7 +20,7 @@ export type RunPhase =
   | 'complete';
 
 export type RunStatus = 'queued' | 'running' | 'complete' | 'failed' | 'paused';
-export type TriggerSource = 'user' | 'pr_comment' | 'wi_change' | 'scheduled';
+export type TriggerSource = 'user' | 'pr_comment' | 'wi_change' | 'scheduled' | 'cli' | 'web' | 'vscode';
 
 export interface PipelineRun {
   id: number;
